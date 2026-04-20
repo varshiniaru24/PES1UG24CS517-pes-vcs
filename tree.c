@@ -15,6 +15,8 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include "index.h"
+extern int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -103,7 +105,7 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
         // Write mode and name (%o writes octal correctly for Git standards)
         int written = sprintf((char *)buffer + offset, "%o %s", entry->mode, entry->name);
         offset += written + 1; // +1 to step over the null terminator written by sprintf
-
+        
         // Write binary hash
         memcpy(buffer + offset, entry->hash.hash, HASH_SIZE);
         offset += HASH_SIZE;
@@ -113,11 +115,6 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
     *len_out = offset;
     return 0;
 }
-typedef struct {
-    char path[256];
-    char hash[65];
-    uint32_t mode;
-} FlatEntry;
 
 // ─── TODO: Implement these ──────────────────────────────────────────────────
 
@@ -134,48 +131,98 @@ typedef struct {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
-int tree_from_index(ObjectID *id_out) {
-
-    Index idx;
-    index_load(&idx);
-
-    if (idx.count == 0) return -1;
-
+static int write_tree_level(IndexEntry *entries, int count, int depth, ObjectID *id_out) {
     Tree tree;
     tree.count = 0;
 
-    for (int i = 0; i < idx.count; i++) {
+    int i = 0;
 
-        TreeEntry *e = &tree.entries[tree.count++];
+    while (i < count && tree.count < MAX_TREE_ENTRIES) {
+        IndexEntry *entry = &entries[i];
+        
+        const char *part_start = entry->path;
+        int d = 0;
+        while (d < depth) {
+            part_start = strchr(part_start, '/');
+            if (!part_start) break;
+            part_start++;
+            d++;
+        }
+        
+        if (d < depth || !part_start) {
+            i++;
+            continue;
+        }
 
-        e->mode = 0100644;
-
-        // extract filename only
-        const char *base = strrchr(idx.entries[i].path, '/');
-        if (base)
-            strncpy(e->name, base + 1, sizeof(e->name));
-        else
-            strncpy(e->name, idx.entries[i].path, sizeof(e->name));
-
-        e->name[sizeof(e->name)-1] = '\0';
-
-        // convert hash_hex → binary hash
-        for (int j = 0; j < 32; j++) {
-            sscanf(&idx.entries[i].hash_hex[j*2], "%2hhx",
-                   &e->hash.hash[j]);
+        const char *next_slash = strchr(part_start, '/');
+        
+        if (!next_slash) {
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = entry->mode;
+            te->hash = entry->hash;
+            strncpy(te->name, part_start, sizeof(te->name)-1);
+            te->name[sizeof(te->name)-1] = '\0';
+            i++;
+        } 
+        else {
+            size_t dir_len = next_slash - part_start;
+            char dir_name[256];
+            if (dir_len >= sizeof(dir_name)) dir_len = sizeof(dir_name) - 1;
+            strncpy(dir_name, part_start, dir_len);
+            dir_name[dir_len] = '\0';
+            
+            int j = i;
+            while (j < count) {
+                const char *p_start = entries[j].path;
+                int dj = 0;
+                while (dj < depth) {
+                    p_start = strchr(p_start, '/');
+                    if (p_start) p_start++; else break;
+                    dj++;
+                }
+                if (!p_start || strncmp(p_start, dir_name, dir_len) != 0 || p_start[dir_len] != '/') {
+                    break;
+                }
+                j++;
+            }
+            
+            ObjectID sub_id;
+            if (write_tree_level(entries + i, j - i, depth + 1, &sub_id) != 0) return -1;
+            
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = MODE_DIR;
+            te->hash = sub_id;
+            strcpy(te->name, dir_name);
+            i = j;
         }
     }
-
+    
     void *data;
     size_t len;
-
-    tree_serialize(&tree, &data, &len);
-
-    ObjectID id;
-    object_write("tree", data, len, &id);
-
+    if (tree_serialize(&tree, &data, &len) != 0) return -1;
+    
+    if (object_write(OBJ_TREE, data, len, id_out) != 0) {
+        free(data);
+        return -1;
+    }
     free(data);
-
-    *id_out = id;
     return 0;
+}
+
+int tree_from_index(ObjectID *id_out) {
+    Index idx;
+    if (index_load(&idx) != 0) return -1;
+    
+    if (idx.count == 0) {
+        Tree empty;
+        empty.count = 0;
+        void *data;
+        size_t len;
+        if (tree_serialize(&empty, &data, &len) != 0) return -1;
+        int ret = object_write(OBJ_TREE, data, len, id_out);
+        free(data);
+        return ret;
+    }
+    
+    return write_tree_level(idx.entries, idx.count, 0, id_out);
 }
