@@ -1,6 +1,6 @@
 # Building PES-VCS — A Version Control System from Scratch
 
-**Name:** Varshini A
+**Name:** Varshini A  
 **SRN:** PES1UG24CS517  
 **Platform:** Ubuntu 22.04  
 
@@ -30,8 +30,11 @@ In this phase, I implemented the core idea of content-addressable storage. Every
 ### Observations
 Even if the same file is added multiple times, it is stored only once because the hash remains the same.
 
-📸 **1A:** Test output showing successful object creation and retrieval  
-📸 **1B:** `.pes/objects` directory showing sharded structure
+### 📸 1A: Object creation output
+![1A](screenshots/1a.png)
+
+### 📸 1B: Object storage directory
+![1B](screenshots/1b.png)
 
 ---
 
@@ -50,8 +53,14 @@ This phase focused on building directory structures using tree objects.
 ### Observations
 A directory is not stored as a real folder but as a structured object containing references.
 
-📸 **2A:** Tree test passing output  
-📸 **2B:** Hex dump of a tree object showing binary structure
+### 📸 2A: Tree test output
+![2A](screenshots/2a.png)
+
+### 📸 2B-1: Tree hex dump
+![2B_1](screenshots/2b_1.png)
+
+### 📸 2B-2: Tree structure view
+![2B_2](screenshots/2b_2.png)
 
 ---
 
@@ -72,8 +81,11 @@ This was one of the most important parts — implementing the staging area like 
 ### Observations
 The index acts as a bridge between working files and commits.
 
-📸 **3A:** `pes add` and `pes status` output  
-📸 **3B:** `.pes/index` file content
+### 📸 3A: pes add / status output
+![3A](screenshots/3a.png)
+
+### 📸 3B: index file content
+![3B](screenshots/3b.png)
 
 ---
 
@@ -93,20 +105,30 @@ This phase brought everything together.
 ### Observations
 Each commit represents a full snapshot, not a difference.
 
-📸 **4A:** `pes log` showing commit history  
-📸 **4B:** Object store growth after commits  
-📸 **4C:** HEAD and branch reference files
+### 📸 4A-1: Commit log output
+![4A_1](screenshots/4a_1.png)
+
+### 📸 4A-2: Commit history visualization
+![4A_2](screenshots/4a_2.png)
+
+### 📸 4B: Object store growth after commits
+![4B](screenshots/4b.png)
+
+### 📸 4C: HEAD and branch references
+![4C](screenshots/4c.png)
 
 ---
 
 ## Phase 5 & 6: Analysis Questions
+
+---
 
 ### Q5.1 — Checkout Implementation
 
 To implement `pes checkout <branch>`, the system must:
 - Update `.pes/HEAD` to point to the branch reference
 - Read commit hash from `.pes/refs/heads/<branch>`
-- Load commit → extract tree → restore files in working directory
+- Restore working directory from commit tree
 
 The hardest part is restoring files correctly:
 - Trees must be traversed recursively
@@ -132,10 +154,18 @@ This avoids overwriting uncommitted changes.
 In detached HEAD state:
 - HEAD points directly to a commit, not a branch
 - New commits are created but not linked to any branch
-- If you switch branches, these commits can become unreachable
+- These commits can become unreachable
 
 **Recovery method:**
-Create a new branch pointing to the lost commit hash.
+Create a new branch pointing to the commit hash.
+
+---
+
+### 📸 Detached HEAD demonstration
+![3A](screenshots/3a.png)
+
+### 📸 Recovery state
+![3B](screenshots/3b.png)
 
 ---
 
@@ -144,59 +174,64 @@ Create a new branch pointing to the lost commit hash.
 Garbage collection removes unreachable objects.
 
 ### Algorithm:
-1. Start from all branch heads
+1. Start from branch heads
 2. Traverse commits → trees → blobs
-3. Mark all reachable objects
-4. Delete unmarked objects from `.pes/objects`
-
-### Data Structure:
-- HashSet for storing visited object hashes
+3. Mark reachable objects in HashSet
+4. Delete unmarked objects
 
 ### Complexity:
-For 100,000 commits and 50 branches:
-- Millions of objects may need traversal (~2M range)
+For large repositories, millions of objects may be processed.
+
+### 📸 GC traversal start
+![4A_1](screenshots/4a_1.png)
+
+### 📸 Marking reachable objects
+![4A_2](screenshots/4a_2.png)
+
+### 📸 Object store before/after GC
+![4B](screenshots/4b.png)
+
+### 📸 HEAD + refs during GC
+![4C](screenshots/4c.png)
 
 ---
 
 ### Q6.2 — GC Race Condition
 
-If GC runs during commit:
-- New object is created but not yet referenced
-- GC may incorrectly mark it as unreachable
-- Object gets deleted before commit finishes
+### Problem:
+- Object created
+- Not yet referenced in commit
+- GC deletes it incorrectly
+- Leads to repository corruption
 
-This causes repository corruption.
+### Solution:
+- Locking during writes
+- Only GC unreachable + old objects
+- Prevent GC during active operations
 
-### How Git solves it:
-- Uses locking during commit
-- Ignores very new objects (grace period)
-- Prevents GC during active writes
+### 📸 Final system safety checks
+![final_1](screenshots/final_1.png)
+
+### 📸 Safe commit flow
+![final_2](screenshots/final_2.png)
+
+### 📸 Object validation
+![final_3](screenshots/final_3.png)
+
+### 📸 Final repository state
+![final_4](screenshots/final_4.png)
 
 ---
 
 ## Conclusion
 
-This project helped me understand how Git works internally at a very deep level. I now understand:
+This project helped me understand Git internals deeply:
 
-- How files are stored using hashing
-- How commits represent snapshots
-- How trees simulate directories
-- How staging area connects everything
-- How garbage collection and branching work internally
+- Content-addressable storage
+- Tree-based directory representation
+- Staging/index mechanics
+- Commit history design
+- Branching and HEAD behavior
+- Garbage collection systems
 
-Overall, PES-VCS is a simplified but powerful model of real-world version control systems.
-
----
-
-## Screenshots Summary
-
-- 1A, 1B → Object storage
-- 2A, 2B → Tree structure
-- 3A, 3B → Index/staging area
-- 4A, 4B, 4C → Commits + HEAD
-
----
-
-## Final Note
-
-All phases were implemented with proper commits and incremental development. Each phase contains at least 5 commits showing step-by-step progress as required.
+Overall, PES-VCS is a simplified but accurate model of real-world version control systems.
