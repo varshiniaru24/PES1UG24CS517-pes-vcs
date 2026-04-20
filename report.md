@@ -1,6 +1,6 @@
 # Building PES-VCS — A Version Control System from Scratch
 
-**Name:** Varshini Arumugam  
+**Name:** Varshini A
 **SRN:** PES1UG24CS517  
 **Platform:** Ubuntu 22.04  
 
