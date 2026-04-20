@@ -103,7 +103,7 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
         // Write mode and name (%o writes octal correctly for Git standards)
         int written = sprintf((char *)buffer + offset, "%o %s", entry->mode, entry->name);
         offset += written + 1; // +1 to step over the null terminator written by sprintf
-        
+
         // Write binary hash
         memcpy(buffer + offset, entry->hash.hash, HASH_SIZE);
         offset += HASH_SIZE;
@@ -113,6 +113,11 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
     *len_out = offset;
     return 0;
 }
+typedef struct {
+    char path[256];
+    char hash[65];
+    uint32_t mode;
+} FlatEntry;
 
 // ─── TODO: Implement these ──────────────────────────────────────────────────
 
@@ -130,8 +135,47 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //
 // Returns 0 on success, -1 on error.
 int tree_from_index(ObjectID *id_out) {
-    // TODO: Implement recursive tree building
-    // (See Lab Appendix for logical steps)
-    (void)id_out;
-    return -1;
+
+    Index idx;
+    index_load(&idx);
+
+    if (idx.count == 0) return -1;
+
+    Tree tree;
+    tree.count = 0;
+
+    for (int i = 0; i < idx.count; i++) {
+
+        TreeEntry *e = &tree.entries[tree.count++];
+
+        e->mode = 0100644;
+
+        // extract filename only
+        const char *base = strrchr(idx.entries[i].path, '/');
+        if (base)
+            strncpy(e->name, base + 1, sizeof(e->name));
+        else
+            strncpy(e->name, idx.entries[i].path, sizeof(e->name));
+
+        e->name[sizeof(e->name)-1] = '\0';
+
+        // convert hash_hex → binary hash
+        for (int j = 0; j < 32; j++) {
+            sscanf(&idx.entries[i].hash_hex[j*2], "%2hhx",
+                   &e->hash.hash[j]);
+        }
+    }
+
+    void *data;
+    size_t len;
+
+    tree_serialize(&tree, &data, &len);
+
+    ObjectID id;
+    object_write("tree", data, len, &id);
+
+    free(data);
+
+    *id_out = id;
+    return 0;
 }
